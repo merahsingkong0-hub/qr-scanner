@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR & Barcode Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+
+    #reader {
+      width: 100%;
+      max-width: 380px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 2px solid #1e40af;
+      box-shadow: 0 0 30px rgba(56, 189, 248, 0.15);
+    }
+
+    /* Override html5-qrcode default styles */
+    #reader video { border-radius: 14px; }
+    #reader img { display: none !important; }
+
+    .result-box {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 380px;
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid #334155;
+    }
+
+    .result-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+
+    .result-text {
+      font-size: 15px;
+      color: #f1f5f9;
+      word-break: break-all;
+      min-height: 24px;
+    }
+
+    .status-bar {
+      margin-top: 12px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #64748b;
+      flex-shrink: 0;
+    }
+    .dot.scanning { background: #38bdf8; animation: pulse 1.2s infinite; }
+    .dot.success  { background: #22c55e; }
+    .dot.error    { background: #ef4444; }
+    .dot.sending  { background: #f59e0b; animation: pulse 0.8s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .history-box {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .history-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+      margin-bottom: 10px;
+    }
+
+    .history-item {
+      background: #1e293b;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      border-left: 3px solid #22c55e;
+      font-size: 13px;
+    }
+
+    .history-item .time {
+      font-size: 11px;
+      color: #64748b;
+      margin-bottom: 3px;
+    }
+
+    .history-item .val {
+      color: #e2e8f0;
+      word-break: break-all;
+    }
+
+    .btn-reset {
+      margin-top: 16px;
+      width: 100%;
+      max-width: 380px;
+      padding: 12px;
+      background: #1e40af;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-reset:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+
+  <h1>📷 QR & Barcode Scanner</h1>
+  <p class="subtitle">Arahkan kamera ke QR Code atau Barcode</p>
+
+  <div id="reader"></div>
+
+  <div class="result-box">
+    <div class="result-label">Hasil Scan Terakhir</div>
+    <div class="result-text" id="result-text">Belum ada scan...</div>
+    <div class="status-bar">
+      <div class="dot scanning" id="dot"></div>
+      <span id="status-msg">Kamera aktif, siap scan</span>
+    </div>
+  </div>
+
+  <div class="history-box">
+    <div class="history-title">📋 Riwayat Scan</div>
+    <div id="history-list"></div>
+  </div>
+
+  <button class="btn-reset" onclick="clearHistory()">🗑️ Hapus Riwayat</button>
+
+  <script>
+    // ====================================================
+    // ⚠️  GANTI URL INI DENGAN URL /exec GAS ANDA
+    // ====================================================
+    const GAS_URL = "https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/exec";
+    // ====================================================
+
+    let lastResult = "";
+    let scanHistory = [];
+
+    function setStatus(type, msg) {
+      const dot = document.getElementById("dot");
+      const statusMsg = document.getElementById("status-msg");
+      dot.className = "dot " + type;
+      statusMsg.textContent = msg;
+    }
+
+    async function onScanSuccess(decodedText) {
+      if (decodedText === lastResult) return;
+      lastResult = decodedText;
+
+      // Tampilkan hasil
+      document.getElementById("result-text").textContent = decodedText;
+      setStatus("sending", "Mengirim ke Google Sheets...");
+
+      // Kirim ke GAS
+      try {
+        const res = await fetch(GAS_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            qrResult: decodedText,
+            timestamp: new Date().toISOString(),
+            deviceInfo: navigator.userAgent
+          })
+        });
+        const json = await res.json();
+        setStatus("success", "✓ Tersimpan di Google Sheets");
+      } catch (err) {
+        setStatus("error", "Gagal kirim: " + err.message);
+      }
+
+      // Tambah ke riwayat
+      const now = new Date().toLocaleTimeString("id-ID");
+      scanHistory.unshift({ time: now, val: decodedText });
+      renderHistory();
+
+      // Reset debounce 3 detik
+      setTimeout(() => {
+        lastResult = "";
+        setStatus("scanning", "Siap scan berikutnya");
+      }, 3000);
+    }
+
+    function renderHistory() {
+      const list = document.getElementById("history-list");
+      if (scanHistory.length === 0) {
+        list.innerHTML = '<p style="color:#64748b;font-size:13px;">Belum ada riwayat</p>';
+        return;
+      }
+      list.innerHTML = scanHistory.slice(0, 10).map(h => `
+        <div class="history-item">
+          <div class="time">${h.time}</div>
+          <div class="val">${h.val}</div>
+        </div>
+      `).join("");
+    }
+
+    function clearHistory() {
+      scanHistory = [];
+      renderHistory();
+    }
+
+    // Inisialisasi scanner
+    const html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      onScanSuccess,
+      () => {}
+    ).catch(err => {
+      setStatus("error", "Kamera gagal dibuka");
+      document.getElementById("result-text").textContent = "❌ Error: " + err;
+    });
+
+    renderHistory();
+  </script>
+</body>
+</html>
